@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b1220" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="icon-192.png" />
+    <title>ShelfScan</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <main>
+      <!-- SCAN -->
+      <section id="view-scan" class="view active" aria-label="Scan">
+        <div class="cam">
+          <video id="video" playsinline muted autoplay></video>
+          <div id="frame" class="frame"></div>
+          <div id="flash" class="flash"></div>
+          <div class="cam-top">
+            <button id="loc-chip" class="chip" title="Location applied to new scans">
+              <svg viewBox="0 0 24 24" class="ic"><path d="M12 22s7-6.2 7-12a7 7 0 1 0-14 0c0 5.8 7 12 7 12z"/><circle cx="12" cy="10" r="2.5"/></svg>
+              <span id="loc-text">Set location</span>
+              <span id="temp-text" class="temp"></span>
+            </button>
+            <span id="queue-chip" class="chip hidden"><span class="spin"></span><span id="queue-n">0</span> reading</span>
+          </div>
+          <div id="status" class="status">Starting camera…</div>
+          <div class="hold"><div id="hold-bar"></div></div>
+          <div class="cam-controls">
+            <button id="btn-auto" class="round" aria-pressed="true" title="Hands-free auto capture">AUTO</button>
+            <button id="btn-shutter" class="shutter" aria-label="Capture now"></button>
+            <button id="btn-torch" class="round" title="Flashlight" aria-pressed="false">
+              <svg viewBox="0 0 24 24" class="ic"><path d="M9 2h6l-1 7h4l-8 13 2-9H8z"/></svg>
+            </button>
+          </div>
+          <div id="cam-error" class="cam-error hidden">
+            <p id="cam-error-msg">Camera not available.</p>
+            <button id="btn-start-cam" class="btn primary">Start camera</button>
+            <label class="btn">Take / choose photo instead<input class="photo-input" type="file" accept="image/*" capture="environment" hidden /></label>
+          </div>
+        </div>
+        <div class="recent-head">
+          <span>Recent scans</span>
+          <span class="head-actions">
+            <label class="link">+ Photo<input class="photo-input" type="file" accept="image/*" multiple hidden /></label>
+            <button id="btn-rebg" class="link" title="Use if auto-capture gets confused: clear the spot, then tap">Reset empty view</button>
+          </span>
+        </div>
+        <div id="recent" class="recent"></div>
+      </section>
+
+      <!-- LIBRARY -->
+      <section id="view-library" class="view" aria-label="Library">
+        <header class="lib-head">
+          <input id="search" type="search" placeholder="Search name, CAS, supplier, location…" autocomplete="off" />
+          <select id="temp-filter" aria-label="Filter by storage temperature">
+            <option value="">All temps</option>
+          </select>
+          <select id="sort" aria-label="Sort">
+            <option value="new">Newest</option>
+            <option value="old">Oldest</option>
+            <option value="name">Name A–Z</option>
+            <option value="loc">Location</option>
+          </select>
+        </header>
+        <div class="export-row">
+          <button id="btn-csv" class="btn">CSV</button>
+          <button id="btn-html" class="btn">Printable sheet</button>
+          <button id="btn-zip" class="btn primary">ZIP + photos</button>
+        </div>
+        <div class="lib-sub">
+          <span id="lib-summary" class="muted small"></span>
+          <span class="seg" role="tablist">
+            <button id="mode-cards" class="on" type="button">Cards</button>
+            <button id="mode-table" type="button">Table</button>
+          </span>
+        </div>
+        <div id="list" class="list"></div>
+      </section>
+
+      <!-- SETTINGS -->
+      <section id="view-settings" class="view" aria-label="Settings">
+        <h2>Recognition</h2>
+        <div class="card">
+          <p class="muted small" style="margin:0">Labels are read on this phone with Tesseract OCR. Photos never leave the device.</p>
+          <label class="toggle"><input id="pubchem" type="checkbox" /> <span>Look up compounds in PubChem<br /><small class="muted">Fills formula, MW, IUPAC, SMILES, GHS hazards from the CAS number or name.</small></span></label>
+        </div>
+
+        <h2>Capture</h2>
+        <div class="card">
+          <label class="toggle"><input id="auto" type="checkbox" /> <span>Hands-free auto capture</span></label>
+          <label>Sensitivity <span id="sens-val" class="muted"></span><input id="sens" type="range" min="1" max="3" step="1" /></label>
+          <label>Hold still for <span id="hold-val" class="muted"></span><input id="hold" type="range" min="400" max="2000" step="100" /></label>
+          <label class="toggle"><input id="beep" type="checkbox" /> <span>Beep / vibrate on capture</span></label>
+        </div>
+
+        <h2>Data</h2>
+        <div class="card">
+          <div id="storage-info" class="muted small"></div>
+          <div class="btn-row">
+            <label class="btn">Import backup ZIP<input id="import" type="file" accept=".zip,application/zip" hidden /></label>
+            <button id="btn-retry" class="btn">Re-read unresolved</button>
+          </div>
+          <button id="btn-clear" class="btn danger">Delete all scans</button>
+        </div>
+        <p class="muted small center">ShelfScan · data stays on this device until you export it.</p>
+      </section>
+    </main>
+
+    <nav class="tabs">
+      <button data-view="scan" class="active">
+        <svg viewBox="0 0 24 24" class="ic"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>Scan
+      </button>
+      <button data-view="library">
+        <svg viewBox="0 0 24 24" class="ic"><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-9V3"/><path d="M7.5 15h9"/></svg>Library <span id="count-badge" class="badge">0</span>
+      </button>
+      <button data-view="settings">
+        <svg viewBox="0 0 24 24" class="ic"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>Settings
+      </button>
+    </nav>
+
+    <!-- DETAIL SHEET -->
+    <div id="sheet" class="sheet hidden" role="dialog" aria-modal="true">
+      <div class="sheet-bar">
+        <button id="sheet-close" class="link">← Back</button>
+        <span id="sheet-status"></span>
+        <button id="sheet-delete" class="link danger-text">Delete</button>
+      </div>
+      <div class="sheet-body">
+        <div class="photos">
+          <img id="d-photo" alt="Container photo" />
+          <a id="d-struct-link" target="_blank" rel="noopener"><img id="d-struct" alt="Structure" /></a>
+        </div>
+        <div id="d-alert" class="alert hidden"></div>
+        <div id="d-cands" class="cands"></div>
+        <form id="d-form" class="form"></form>
+        <div id="d-hazard" class="hazard"></div>
+        <div id="d-meta" class="meta small muted"></div>
+        <details>
+          <summary>Recognized text</summary>
+          <pre id="d-ocr"></pre>
+        </details>
+        <button id="d-reread" class="btn">Re-read label</button>
+      </div>
+    </div>
+
+    <!-- BATCH SETTINGS (applied to every new scan) -->
+    <dialog id="batch" class="batch">
+      <form method="dialog">
+        <h3>Applied to the next scans</h3>
+        <label>Location
+          <input id="batch-loc" list="loc-list" placeholder="e.g. Flammables cabinet A, shelf 2" autocomplete="off" />
+          <datalist id="loc-list"></datalist>
+        </label>
+        <div class="field-label">Storage temperature</div>
+        <div id="batch-temp" class="temps"></div>
+        <div class="btn-row">
+          <button value="cancel" class="btn">Cancel</button>
+          <button id="batch-save" value="save" class="btn primary">Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div id="viewer" class="viewer hidden"><img alt="" /></div>
+    <div id="toast" class="toast" role="status"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
