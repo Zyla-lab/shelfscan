@@ -2,6 +2,9 @@
 const KEY = 'chemscan.settings.v1';
 
 const DEFAULTS = {
+  engine: 'ocr', // 'ocr' (on-device Tesseract) or 'claude' (Claude Haiku, needs apiKey)
+  apiKey: '',
+  usage: { calls: 0, inTok: 0, outTok: 0 },
   pubchem: true,
   autoCapture: true,
   sensitivity: 2,

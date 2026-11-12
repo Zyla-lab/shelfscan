@@ -1,11 +1,19 @@
 # ShelfScan
 
 Phone web app for cataloguing a chemical library. Put the phone on a stand pointing at an empty spot,
-place bottles one at a time. Each one is photographed automatically, the label is read on the phone, the
-compound is looked up in PubChem, and the next bottle can go in straight away.
+place bottles one at a time. Each one is photographed automatically, the label is read, the compound is
+looked up in PubChem, and the next bottle can go in straight away.
 
-No AI service, no account, no server: label text is read on the phone with Tesseract OCR, and data stays
-in the browser until you export it.
+Two label readers (Settings → Recognition):
+
+- **Claude Haiku** (recommended): the photo goes to Anthropic's API with your own API key, which is stored
+  only on the phone. Reads curved, glossy, small and handwritten labels. About $0.0005 per bottle
+  (~1,900 input + ~200 output tokens at $0.10 / $0.50 per million), so 1,000 bottles cost about $0.50.
+  Settings shows a running total. Use a dedicated key with a monthly spend limit.
+- **On this phone**: Tesseract OCR, free and offline, but unreliable on real labels. Also used automatically
+  when Claude is selected but the phone is offline.
+
+There is no server: data stays in the browser until you export it.
 
 ## Use it
 
@@ -55,6 +63,7 @@ auto-capture gets confused.
 | File | Role |
 |---|---|
 | `src/camera.js` | Camera plus auto-capture. Samples a 48×36 grayscale thumbnail about 8×/s, waits for stillness, then compares the frame with the learned empty background and with the last capture (tolerant of small nudges), so a bottle is captured once and the empty spot never is. |
+| `src/claude.js` | Claude Haiku label reader: one vision request per photo (downscaled to 1568 px JPEG), low effort, JSON-schema output. The SDK loads only when Claude is selected. |
 | `src/ocr.js` | Tesseract.js in a Web Worker, with contrast stretch and auto-rotation. Falls back to sparse-text mode on labels with little text. |
 | `src/parse.js` | Pure text rules: CAS (checksum-validated, fixes O/0 and l/1 confusions), supplier, catalog #, lot, amount, purity/grade, MW, expiry, storage temperature, GS1 barcode data, and ranking of name candidates. Unit-tested. |
 | `src/pubchem.js` | CAS or name → PubChem: canonical name, formula, MW, IUPAC, SMILES, InChIKey, GHS. Uses the ECHA aggregate and ignores minority hazard statements. |
@@ -69,6 +78,9 @@ npm test         # parser unit tests
 
 ## Limits
 
+- Claude only transcribes what is on the label (it is told never to fill a CAS number or other value from
+  memory). A CAS number that fails the checksum is dropped and the item is marked **CHECK**, as are
+  illegible photos and low-confidence reads.
 - On-device OCR does well on flat, well-lit, printed labels and struggles with curved small print, glare
   and handwriting. Good light (or the flashlight) and filling the frame with the label help most. When the
   CAS number is read, PubChem fills everything else reliably. When it isn't, check the item.

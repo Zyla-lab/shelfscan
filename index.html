@@ -87,7 +87,18 @@
       <section id="view-settings" class="view" aria-label="Settings">
         <h2>Recognition</h2>
         <div class="card">
-          <p class="muted small" style="margin:0">Labels are read on this phone with Tesseract OCR. Photos never leave the device.</p>
+          <label class="toggle"><input type="radio" name="engine" value="claude" /> <span>Claude Haiku (recommended)<br /><small class="muted">Reads curved, small and handwritten labels well. Each photo is sent to Anthropic's API with your key; about $0.0005 per bottle.</small></span></label>
+          <label class="toggle"><input type="radio" name="engine" value="ocr" /> <span>On this phone (free, offline)<br /><small class="muted">Tesseract OCR. Photos never leave the device, but it often misreads real labels.</small></span></label>
+          <div id="claude-opts">
+            <label>Anthropic API key
+              <input id="api-key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…" />
+            </label>
+            <p class="muted small" style="margin:0">Stored only in this browser on this phone. Best: a separate key with a monthly spend limit, made at console.anthropic.com.</p>
+            <div class="btn-row">
+              <button id="btn-test-key" class="btn" type="button">Test key</button>
+            </div>
+            <div id="usage-info" class="muted small"></div>
+          </div>
           <label class="toggle"><input id="pubchem" type="checkbox" /> <span>Look up compounds in PubChem<br /><small class="muted">Fills formula, MW, IUPAC, SMILES, GHS hazards from the CAS number or name.</small></span></label>
         </div>
 

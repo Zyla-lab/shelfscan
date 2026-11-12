@@ -2,6 +2,7 @@ import { Camera, AutoCapture } from './camera.js';
 import { putItem, putImages, getItem, getImages, allItems, deleteItem, clearAll, requestPersistence } from './db.js';
 import { enqueue, onItemUpdated, pendingCount } from './pipeline.js';
 import { preloadOCR } from './ocr.js';
+import { testKey, costOf, describeError } from './claude.js';
 import { exportCSV, exportZIP, exportHTML, importZIP } from './export.js';
 import { TEMPS } from './parse.js';
 import { structureImageUrl, compoundPageUrl } from './pubchem.js';
@@ -490,7 +491,7 @@ $('#d-cands').addEventListener('click', async (e) => {
   fillDetail(it);
 });
 
-const AUTO_FIELDS = ['formula', 'mw', 'supplier', 'catalog', 'lot', 'amount', 'purity', 'expiry', 'signal', 'hazards', 'pictograms', 'storage', 'iupac', 'smiles', 'inchikey', 'cid', 'pubchemName', 'matchedBy', 'barcode', 'ocrText', 'candidates', 'error'];
+const AUTO_FIELDS = ['formula', 'mw', 'supplier', 'catalog', 'lot', 'amount', 'purity', 'expiry', 'signal', 'hazards', 'pictograms', 'storage', 'iupac', 'smiles', 'inchikey', 'cid', 'pubchemName', 'matchedBy', 'barcode', 'ocrText', 'candidates', 'error', 'engine', 'confidence', 'aiTokens'];
 
 async function reread(it, { keepCas = true } = {}) {
   for (const k of AUTO_FIELDS) delete it[k];
@@ -573,7 +574,10 @@ function show(view) {
   if (view === 'scan') startCamera();
   else stopCamera();
   if (view === 'library') renderLibrary();
-  if (view === 'settings') renderStorage();
+  if (view === 'settings') {
+    renderStorage();
+    syncSettingsUI();
+  }
 }
 
 document.querySelector('.tabs').addEventListener('click', (e) => {
@@ -701,6 +705,8 @@ $('#btn-zip').addEventListener('click', async () => {
 function initSettings() {
   const s = settings.get();
   $('#pubchem').checked = s.pubchem;
+  for (const r of document.querySelectorAll('input[name=engine]')) r.checked = r.value === s.engine;
+  $('#api-key').value = s.apiKey;
   $('#auto').checked = s.autoCapture;
   $('#sens').value = s.sensitivity;
   $('#hold').value = s.holdMs;
@@ -714,12 +720,21 @@ function syncSettingsUI() {
   $('#hold-val').textContent = `${(s.holdMs / 1000).toFixed(1)} s`;
   auto.setSensitivity(Number(s.sensitivity));
   auto.holdMs = Number(s.holdMs);
-  preloadOCR();
+  const useClaude = s.engine === 'claude';
+  $('#claude-opts').classList.toggle('hidden', !useClaude);
+  const u = s.usage || {};
+  $('#usage-info').textContent = u.calls
+    ? `${u.calls} label${u.calls === 1 ? '' : 's'} read by Claude on this phone, about $${costOf(u).toFixed(u.calls < 100 ? 4 : 2)} in total.`
+    : '';
+  // OCR is also the offline fallback for Claude, but only download it up front when it's the main reader
+  if (!useClaude || !s.apiKey) preloadOCR();
 }
 
 $('#view-settings').addEventListener('change', (e) => {
   const t = e.target;
-  if (t.id === 'pubchem') settings.set({ pubchem: t.checked });
+  if (t.name === 'engine') settings.set({ engine: t.value });
+  else if (t.id === 'api-key') settings.set({ apiKey: t.value.trim() });
+  else if (t.id === 'pubchem') settings.set({ pubchem: t.checked });
   else if (t.id === 'auto') {
     settings.set({ autoCapture: t.checked });
     syncAutoButton();
@@ -758,6 +773,21 @@ $('#import').addEventListener('change', async (e) => {
     renderStorage();
   } catch (err) {
     toast(`Import failed: ${err.message}`, 4000);
+  }
+});
+
+$('#btn-test-key').addEventListener('click', async (e) => {
+  const key = $('#api-key').value.trim();
+  if (!key) return toast('Paste your API key first');
+  settings.set({ apiKey: key });
+  e.target.disabled = true;
+  try {
+    const name = await testKey(key);
+    toast(`Key works: ${name} is available`);
+  } catch (err) {
+    toast(describeError(err), 5000);
+  } finally {
+    e.target.disabled = false;
   }
 });
 

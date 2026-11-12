@@ -2,7 +2,8 @@
 // time so the camera never waits for OCR / network.
 import { getItem, getImages, putItem } from './db.js';
 import { recognize } from './ocr.js';
-import { parseLabel, parseGS1, tempFromText } from './parse.js';
+import { parseLabel, parseGS1, tempFromText, findCasNumbers } from './parse.js';
+import { readLabel, describeError, isConnectionError } from './claude.js';
 import { resolve } from './pubchem.js';
 import { settings } from './settings.js';
 
@@ -63,6 +64,11 @@ async function readBarcodes(canvas) {
   }
 }
 
+function recordUsage(u) {
+  const prev = settings.get().usage || { calls: 0, inTok: 0, outTok: 0 };
+  settings.set({ usage: { calls: prev.calls + 1, inTok: prev.inTok + u.inTok, outTok: prev.outTok + u.outTok } });
+}
+
 const fill = (item, key, value) => {
   if (value && !item[key]) item[key] = value;
 };
@@ -78,11 +84,48 @@ async function processItem(id) {
 
   const canvas = await blobToCanvas(imgs.full);
   const s = settings.get();
-  item.engine = 'on-device';
   let candidates = [];
   let casList = [];
+  let read = null;
 
-  {
+  if (s.engine === 'claude' && s.apiKey && navigator.onLine) {
+    try {
+      read = await readLabel(canvas, s.apiKey);
+      recordUsage(read.usage);
+    } catch (e) {
+      if (e.usage) recordUsage(e.usage);
+      // Offline / unreachable: still get something from the on-device reader.
+      // Anything else (bad key, spend limit) is shown on the item so it can be retried.
+      if (!isConnectionError(e)) throw new Error(describeError(e));
+      item.error = `${describeError(e)} Read on the phone instead.`;
+    }
+  }
+
+  if (read) {
+    const d = read.data;
+    item.engine = 'Claude Haiku';
+    item.confidence = d.confidence;
+    item.aiTokens = read.usage.inTok + read.usage.outTok;
+    // a misread CAS fails the checksum and is dropped rather than sent to PubChem
+    casList = findCasNumbers(d.cas || '');
+    if (d.cas && !casList.length) item.error = `CAS on label read as "${d.cas}", which is not a valid CAS number.`;
+    candidates = [...new Set([d.search_name, d.name].map((x) => (x || '').trim()).filter(Boolean))];
+    fill(item, 'supplier', d.supplier);
+    fill(item, 'catalog', d.catalog);
+    fill(item, 'lot', d.lot);
+    fill(item, 'amount', d.amount);
+    fill(item, 'purity', [d.concentration, d.purity].filter(Boolean).join(', '));
+    fill(item, 'expiry', d.expiry);
+    fill(item, 'storage', d.storage);
+    fill(item, 'signal', d.signal_word);
+    fill(item, 'hazards', d.hazard_codes);
+    item.ocrText = Object.entries(d)
+      .filter(([k, v]) => v && typeof v === 'string' && !['confidence', 'search_name'].includes(k))
+      .map(([k, v]) => `${k}: ${v}`)
+      .join('\n');
+    if (!d.legible) item.error = 'Claude could not read a label in this photo. Retake it with the label facing the camera.';
+  } else {
+    item.engine = 'on-device';
     const { text, lines } = await recognize(canvas);
     const p = parseLabel(text, lines);
     item.ocrText = text.trim();
@@ -139,9 +182,15 @@ async function processItem(id) {
 
   if (!item.nameEdited) {
     // PubChem's title is cleaner than raw OCR text; fall back to the best OCR line
-    item.name = pc?.title || candidates[0] || '';
+    item.name = pc?.title || read?.data.name || candidates[0] || '';
   }
-  item.status = item.name && (item.cas || pc) ? 'done' : 'review';
+  if (read) {
+    // A lab-made solution has no CAS and may not be in PubChem; a confident read is enough.
+    const d = read.data;
+    item.status = d.legible && item.name && d.confidence !== 'low' && !item.error ? 'done' : 'review';
+  } else {
+    item.status = item.name && (item.cas || pc) ? 'done' : 'review';
+  }
   item.updatedAt = new Date().toISOString();
   await putItem(item);
   notify(item);

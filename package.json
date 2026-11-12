@@ -12,6 +12,7 @@
   "keywords": [],
   "type": "module",
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.8.0",
     "jszip": "^3.10.2",
     "tesseract.js": "^7.0.0"
   },
