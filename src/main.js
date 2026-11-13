@@ -474,6 +474,7 @@ $('#d-form').addEventListener('input', (e) => {
   if (!it) return;
   it[e.target.name] = e.target.value;
   if (e.target.name === 'name') it.nameEdited = true;
+  if (e.target.name === 'cas') it.casEdited = !!e.target.value.trim();
   it.updatedAt = new Date().toISOString();
   if (it.status === 'review' && it.name) it.status = 'done';
   clearTimeout(saveTimer);
@@ -493,9 +494,16 @@ $('#d-cands').addEventListener('click', async (e) => {
 
 const AUTO_FIELDS = ['formula', 'mw', 'supplier', 'catalog', 'lot', 'amount', 'purity', 'expiry', 'signal', 'hazards', 'pictograms', 'storage', 'iupac', 'smiles', 'inchikey', 'cid', 'pubchemName', 'matchedBy', 'barcode', 'ocrText', 'candidates', 'error', 'engine', 'confidence', 'aiTokens'];
 
-async function reread(it, { keepCas = true } = {}) {
+const readerName = () => (settings.get().engine === 'claude' && settings.get().apiKey ? 'Claude Haiku' : 'on-device OCR');
+
+/**
+ * Read the photo again with the current reader and replace everything that was read automatically.
+ * Kept: a name or CAS the user typed / picked, location, storage temp, notes.
+ */
+async function reread(it) {
   for (const k of AUTO_FIELDS) delete it[k];
-  if (!keepCas) delete it.cas;
+  if (!it.casEdited) delete it.cas;
+  if (!it.nameEdited) it.name = '';
   it.status = 'processing';
   await putItem(it);
   enqueue(it.id);
@@ -506,15 +514,9 @@ $('#d-reread').addEventListener('click', async () => {
   const it = items.find((i) => i.id === openId);
   if (!it) return;
   clearTimeout(saveTimer);
-  // A CAS typed by the user is kept and used for the PubChem lookup
-  const userCas = it.cas;
   await reread(it);
-  if (userCas) {
-    it.cas = userCas;
-    await putItem(it);
-  }
   fillDetail(it);
-  toast('Re-reading label…');
+  toast(`Re-reading with ${readerName()}…`);
 });
 
 $('#sheet-delete').addEventListener('click', async () => {
@@ -795,7 +797,19 @@ $('#btn-retry').addEventListener('click', async () => {
   const todo = items.filter((i) => i.status === 'review' || i.status === 'error');
   if (!todo.length) return toast('Nothing to re-read');
   for (const it of todo) await reread(it);
-  toast(`Re-reading ${todo.length} scan${todo.length === 1 ? '' : 's'}…`);
+  toast(`Re-reading ${todo.length} scan${todo.length === 1 ? '' : 's'} with ${readerName()}…`);
+});
+
+$('#btn-reread-all').addEventListener('click', async () => {
+  const todo = items.filter((i) => i.status !== 'processing');
+  if (!todo.length) return toast('Nothing to re-read');
+  const reader = readerName();
+  const est = costOf({ inTok: 1900 * todo.length, outTok: 250 * todo.length });
+  const cost = reader === 'Claude Haiku' ? ` (${est < 0.01 ? 'under 1 cent' : `about $${est.toFixed(2)}`})` : '';
+  if (!confirm(`Re-read all ${todo.length} scans with ${reader}${cost}? Results read before are replaced; names and CAS numbers you typed are kept.`)) return;
+  for (const it of todo) await reread(it);
+  renderLibrary();
+  toast(`Re-reading ${todo.length} scans with ${reader}…`);
 });
 
 $('#btn-clear').addEventListener('click', async () => {

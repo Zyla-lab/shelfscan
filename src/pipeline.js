@@ -8,38 +8,47 @@ import { resolve } from './pubchem.js';
 import { settings } from './settings.js';
 
 const queue = [];
-let running = false;
+const active = new Set();
 const listeners = new Set();
 
 export const onItemUpdated = (fn) => listeners.add(fn);
 const notify = (item) => listeners.forEach((fn) => fn(item));
-export const pendingCount = () => queue.length + (running ? 1 : 0);
+export const pendingCount = () => queue.length + active.size;
 
 export function enqueue(id) {
-  if (!queue.includes(id)) queue.push(id);
+  if (!queue.includes(id) && !active.has(id)) queue.push(id);
   pump();
 }
 
-async function pump() {
-  if (running) return;
-  running = true;
-  while (queue.length) {
+// Claude requests are network-bound, so a few run side by side (a full re-read of a big library
+// would otherwise take ages). On-device OCR is CPU-bound and runs one at a time.
+const parallelism = () => (settings.get().engine === 'claude' && settings.get().apiKey ? 3 : 1);
+
+function pump() {
+  while (queue.length && active.size < parallelism()) {
     const id = queue.shift();
-    try {
-      await processItem(id);
-    } catch (e) {
-      console.error(e);
-      const item = await getItem(id);
-      if (item) {
-        item.status = 'error';
-        item.error = String(e.message || e);
-        await putItem(item);
-        notify(item);
-      }
+    active.add(id);
+    work(id).finally(() => {
+      active.delete(id);
+      if (!queue.length && !active.size) notify(null);
+      pump();
+    });
+  }
+}
+
+async function work(id) {
+  try {
+    await processItem(id);
+  } catch (e) {
+    console.error(e);
+    const item = await getItem(id);
+    if (item) {
+      item.status = 'error';
+      item.error = String(e.message || e);
+      await putItem(item);
+      notify(item);
     }
   }
-  running = false;
-  notify(null);
 }
 
 async function blobToCanvas(blob) {
@@ -154,6 +163,8 @@ async function processItem(id) {
     }
   }
 
+  // A CAS number typed by the user beats whatever was read, and drives the PubChem lookup
+  if (item.casEdited && item.cas) casList = [item.cas, ...casList.filter((c) => c !== item.cas)];
   if (casList[0]) fill(item, 'cas', casList[0]);
   // batch default wins (it's where the bottle actually lives); otherwise use the label
   fill(item, 'temp', tempFromText(`${item.storage || ''}\n${item.ocrText || ''}`));
