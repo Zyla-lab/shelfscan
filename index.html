@@ -112,9 +112,14 @@
 
         <h2>Data</h2>
         <div class="card">
+          <label>Your name or initials
+            <input id="user-name" type="text" autocomplete="name" placeholder="e.g. DZ" />
+          </label>
+          <p class="muted small" style="margin:0">Saved with each new scan as "Scanned by", so merged libraries show who added what.</p>
+          <p class="muted small" style="margin:0"><b>Scanning as a team:</b> keep one ZIP in a shared folder. Before scanning, <i>Import / merge ZIP</i> the latest one; after scanning, export a new ZIP (Library → ZIP + photos) back to the folder. Merging adds new scans, keeps the newest edit of each scan, and applies deletions.</p>
           <div id="storage-info" class="muted small"></div>
           <div class="btn-row">
-            <label class="btn">Import backup ZIP<input id="import" type="file" accept=".zip,application/zip" hidden /></label>
+            <label class="btn" id="import-label">Import / merge ZIP<input id="import" type="file" accept=".zip,application/zip" hidden /></label>
             <button id="btn-retry" class="btn">Re-read unresolved</button>
           </div>
           <button id="btn-reread-all" class="btn">Re-read all scans</button>

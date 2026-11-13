@@ -1,5 +1,5 @@
 import { Camera, AutoCapture } from './camera.js';
-import { putItem, putImages, getItem, getImages, allItems, deleteItem, clearAll, requestPersistence } from './db.js';
+import { putItem, putImages, getItem, getImages, allItems, deleteItem, markDeleted, clearAll, requestPersistence } from './db.js';
 import { enqueue, onItemUpdated, pendingCount, ABOUT_FIELDS } from './pipeline.js';
 import { preloadOCR } from './ocr.js';
 import { testKey, costOf, describeError } from './claude.js';
@@ -165,6 +165,7 @@ async function addScan(canvas) {
     name: '',
     location: settings.get().location || '',
     temp: settings.get().temp || '',
+    scannedBy: settings.get().userName || '',
     notes: '',
   };
   await putImages(item.id, full, thumb);
@@ -518,7 +519,7 @@ function fillDetail(it) {
   if (it.barcode) meta.push(`Barcode: ${esc(it.barcode)}`);
   if (it.aboutBy === 'Claude Haiku') meta.push('Description, uses, concentrations and handling were written by Claude Haiku from general knowledge. Check before relying on them.');
   else if (it.aboutBy) meta.push('Claude did not recognize this substance, so there is no description.');
-  meta.push(`Scanned ${new Date(it.createdAt).toLocaleString()}${it.engine ? ` · read by ${esc(it.engine)}` : ''}`);
+  meta.push(`Scanned ${new Date(it.createdAt).toLocaleString()}${it.scannedBy ? ` by ${esc(it.scannedBy)}` : ''}${it.engine ? ` · read by ${esc(it.engine)}` : ''}`);
   $('#d-meta').innerHTML = meta.map((m) => `<div>${m}</div>`).join('');
   $('#d-ocr').textContent = it.ocrText || '(none yet)';
   $('#d-describe').classList.toggle('hidden', !claudeReady() || !it.name || it.status === 'processing');
@@ -613,6 +614,7 @@ $('#sheet-delete').addEventListener('click', async () => {
   if (!openId || !confirm('Delete this scan and its photo?')) return;
   const id = openId;
   await deleteItem(id);
+  markDeleted(id); // so merging someone else's older ZIP doesn't bring it back
   items = items.filter((i) => i.id !== id);
   thumbUrls.delete(id);
   renderCount();
@@ -809,6 +811,7 @@ function initSettings() {
   $('#pubchem').checked = s.pubchem;
   for (const r of document.querySelectorAll('input[name=engine]')) r.checked = r.value === s.engine;
   $('#api-key').value = s.apiKey;
+  $('#user-name').value = s.userName;
   $('#auto').checked = s.autoCapture;
   $('#sens').value = s.sensitivity;
   $('#hold').value = s.holdMs;
@@ -836,6 +839,7 @@ $('#view-settings').addEventListener('change', (e) => {
   const t = e.target;
   if (t.name === 'engine') settings.set({ engine: t.value });
   else if (t.id === 'api-key') settings.set({ apiKey: t.value.trim() });
+  else if (t.id === 'user-name') settings.set({ userName: t.value.trim() });
   else if (t.id === 'pubchem') settings.set({ pubchem: t.checked });
   else if (t.id === 'auto') {
     settings.set({ autoCapture: t.checked });
@@ -868,13 +872,25 @@ $('#import').addEventListener('change', async (e) => {
   const f = e.target.files?.[0];
   e.target.value = '';
   if (!f) return;
+  const label = $('#import-label');
   try {
-    const n = await importZIP(f, makeThumb);
+    const s = await importZIP(f, makeThumb, (i, n) => (label.firstChild.textContent = `Merging ${i}/${n}…`));
     await loadItems();
-    toast(`Imported ${n} chemicals`);
+    if (currentView === 'library') renderLibrary();
+    const parts = [
+      s.added && `${s.added} added`,
+      s.updated && `${s.updated} updated`,
+      s.removed && `${s.removed} removed (deleted on the other phone)`,
+      s.keptLocal && `${s.keptLocal} kept (edited more recently here)`,
+      s.unchanged && `${s.unchanged} already up to date`,
+      s.skippedDeleted && `${s.skippedDeleted} skipped (deleted here)`,
+    ].filter(Boolean);
+    toast(`Merged: ${parts.join(', ') || 'nothing new'}. Library now has ${items.length} scans.`, 6000);
     renderStorage();
   } catch (err) {
     toast(`Import failed: ${err.message}`, 4000);
+  } finally {
+    label.firstChild.textContent = 'Import / merge ZIP';
   }
 });
 

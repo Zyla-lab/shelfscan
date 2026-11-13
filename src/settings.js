@@ -10,6 +10,7 @@ const DEFAULTS = {
   sensitivity: 2,
   holdMs: 800,
   beep: true,
+  userName: '', // saved with each scan as 'Scanned by'
   location: '',
   temp: '',
   libraryMode: 'cards',

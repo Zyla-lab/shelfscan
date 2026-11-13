@@ -1,6 +1,6 @@
 // CSV / ZIP export and ZIP backup import.
 import JSZip from 'jszip';
-import { allItems, getImages, putItem, putImages } from './db.js';
+import { allItems, getImages, putItem, putImages, deleteItem, getDeleted, saveDeleted } from './db.js';
 
 export const COLUMNS = [
   ['name', 'Name'],
@@ -33,6 +33,7 @@ export const COLUMNS = [
   ['cid', 'PubChem CID'],
   ['barcode', 'Barcode'],
   ['createdAt', 'Scanned at'],
+  ['scannedBy', 'Scanned by'],
   ['ocrText', 'Label text'],
   ['id', 'ID'],
 ];
@@ -100,7 +101,7 @@ export async function exportZIP(onProgress) {
   const items = sorted(await allItems());
   const zip = new JSZip();
   zip.file('catalog.csv', toCSV(items, true));
-  zip.file('catalog.json', JSON.stringify({ app: 'chemscan', version: 1, exportedAt: new Date().toISOString(), items }, null, 2));
+  zip.file('catalog.json', JSON.stringify({ app: 'chemscan', version: 2, exportedAt: new Date().toISOString(), items, deleted: getDeleted() }, null, 2));
   const folder = zip.folder('images');
   for (let i = 0; i < items.length; i++) {
     const imgs = await getImages(items[i].id);
@@ -113,26 +114,69 @@ export async function exportZIP(onProgress) {
   await saveFile(new Blob([blob], { type: 'application/zip' }), `chemicals_${stamp()}.zip`);
 }
 
-/** Restore a ZIP produced by exportZIP. Existing items with the same ID are overwritten. */
-export async function importZIP(file, makeThumb) {
+const editedAt = (it) => it.updatedAt || it.createdAt || '';
+
+/**
+ * Merge a ZIP produced by exportZIP (from this or another phone) into the library.
+ *  - scans not here yet are added (every scan has a unique ID, so two people never collide)
+ *  - a scan present on both sides keeps whichever version was edited last
+ *  - deletions travel with the ZIP: a scan deleted on either side after its last edit stays deleted
+ * @returns {Promise<{added:number, updated:number, keptLocal:number, unchanged:number, removed:number, skippedDeleted:number}>}
+ */
+export async function importZIP(file, makeThumb, onProgress) {
   const zip = await JSZip.loadAsync(file);
   const json = zip.file('catalog.json');
   if (!json) throw new Error('Not a ShelfScan backup (catalog.json missing).');
-  const { items } = JSON.parse(await json.async('string'));
-  const ordered = sorted(items);
-  let n = 0;
+  const data = JSON.parse(await json.async('string'));
+  const ordered = sorted(data.items || []);
+  const local = new Map((await allItems()).map((it) => [it.id, it]));
+
+  // union of deletion records, keeping the latest time per ID
+  const deleted = getDeleted();
+  for (const [id, at] of Object.entries(data.deleted || {})) if (!deleted[id] || at > deleted[id]) deleted[id] = at;
+
+  const stats = { added: 0, updated: 0, keptLocal: 0, unchanged: 0, removed: 0, skippedDeleted: 0 };
   for (let i = 0; i < ordered.length; i++) {
     const it = ordered[i];
-    const imgEntry = zip.file(`images/${imageFileName(it, i)}`);
-    if (imgEntry) {
-      const full = new Blob([await imgEntry.async('arraybuffer')], { type: 'image/jpeg' });
-      await putImages(it.id, full, await makeThumb(full));
+    onProgress?.(i + 1, ordered.length);
+    if (deleted[it.id] && deleted[it.id] >= editedAt(it)) {
+      stats.skippedDeleted++;
+      continue;
+    }
+    const mine = local.get(it.id);
+    if (mine) {
+      if (editedAt(mine) > editedAt(it)) {
+        stats.keptLocal++;
+        continue;
+      }
+      if (editedAt(mine) === editedAt(it)) {
+        stats.unchanged++;
+        continue;
+      }
+      stats.updated++;
+    } else stats.added++;
+    // a scan's photo never changes, so it is only copied when the scan is new here
+    if (!mine) {
+      const imgEntry = zip.file(`images/${imageFileName(it, i)}`);
+      if (imgEntry) {
+        const full = new Blob([await imgEntry.async('arraybuffer')], { type: 'image/jpeg' });
+        await putImages(it.id, full, await makeThumb(full));
+      }
     }
     if (it.status === 'processing') it.status = 'review';
     await putItem(it);
-    n++;
   }
-  return n;
+
+  // deletions made on the other phone
+  for (const [id, at] of Object.entries(deleted)) {
+    const mine = local.get(id);
+    if (mine && at >= editedAt(mine)) {
+      await deleteItem(id);
+      stats.removed++;
+    }
+  }
+  saveDeleted(deleted);
+  return stats;
 }
 
 function blobToDataURL(blob) {
@@ -208,8 +252,10 @@ catalog.csv    The same data as a spreadsheet (UTF-8; opens in Excel, Numbers, L
 catalog.json   Complete machine-readable data.
 images/        Full-resolution photo of every container.
 
-To continue editing on a phone: open ShelfScan (https://zyla-lab.github.io/shelfscan/),
-Settings > Import backup ZIP, and pick this ZIP file.
+To continue on a phone: open ShelfScan (https://zyla-lab.github.io/shelfscan/), Settings >
+Import / merge ZIP, and pick this file. Merging adds scans the phone doesn't have, keeps the newest
+version of scans edited on both sides, and applies deletions. Several people can each scan, merge
+the latest ZIP from the shared folder, and export a new one.
 
 Descriptions, uses and concentrations were written by Claude from general knowledge; check them
 before relying on them. Formula, MW, IUPAC, SMILES and GHS data come from PubChem.

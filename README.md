@@ -55,10 +55,23 @@ label is read, then cached by the browser.
      location / temperature, cards or table, details with swipe, and Print.
    - **ZIP + photos**: the archive and backup format. It contains `catalog.html` (the offline catalog,
      linked to the full-size photos), `catalog.csv`, `catalog.json`, `images/` (full-resolution photos)
-     and a `README.txt`. Restore it on any phone with *Settings → Import backup ZIP*.
+     and a `README.txt`. Restore it on any phone with *Settings → Import / merge ZIP*.
 
    For a lab archive, keep the ZIP: plain HTML, CSV, JSON and JPEG files that stay readable without
    this app.
+
+### Several people, one library
+
+Set *Settings → Your name* on each phone (saved with every scan as "Scanned by"). Keep one ZIP in a
+shared folder: before scanning, *Import / merge ZIP* the latest one; afterwards, export a new ZIP back
+to the folder. Merging:
+
+- adds scans this phone doesn't have (every scan has a unique ID, so nothing collides);
+- keeps the most recently edited version of a scan changed on both phones;
+- applies deletions: a scan deleted on either phone stays deleted unless it was edited after that.
+
+It reports what changed (added / updated / removed / kept). There is no live sync. Two people
+scanning the same bottle create two entries; the "2× in lab" badge (same CAS) helps spot them.
 
 Other controls: **AUTO** toggles hands-free capture (otherwise use the shutter button), ⚡ is the
 flashlight, **+ Photo** adds pictures from the gallery, and *Reset empty view* re-learns the empty spot if

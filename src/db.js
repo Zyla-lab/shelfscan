@@ -57,3 +57,28 @@ export async function requestPersistence() {
     /* not supported */
   }
 }
+
+// ---------------------------------------------------------------- deletion records
+// Kept so that merging another person's ZIP doesn't bring back a scan deleted here, and so a
+// deletion made elsewhere is applied here. id -> ISO time of deletion. Small (one entry per delete).
+const DELETED_KEY = 'chemscan.deleted.v1';
+
+export function getDeleted() {
+  try {
+    return JSON.parse(localStorage.getItem(DELETED_KEY) || '{}');
+  } catch {
+    return {};
+  }
+}
+
+export function saveDeleted(map) {
+  try {
+    localStorage.setItem(DELETED_KEY, JSON.stringify(map));
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+export function markDeleted(id) {
+  saveDeleted({ ...getDeleted(), [id]: new Date().toISOString() });
+}

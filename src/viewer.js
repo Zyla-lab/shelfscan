@@ -240,7 +240,7 @@ function runtime() {
     body.innerHTML = `<div class="photos">${D.photos[it.id] || D.thumbs[it.id] ? `<img class="ph" src="${D.photos[it.id] || D.thumbs[it.id]}" alt="Container photo">` : ''}
       ${it.cid ? `<img class="st" alt="Structure" src="https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/${encodeURIComponent(it.cid)}/PNG?image_size=300x300" onerror="this.remove()">` : ''}</div>
       <h2>${esc(name(it))}</h2>${links.length ? `<div class="links">${links.join('')}</div>` : ''}${groups}
-      <p class="muted small">Scanned ${it.createdAt ? esc(new Date(it.createdAt).toLocaleString()) : '—'}</p>`;
+      <p class="muted small">Scanned ${it.createdAt ? esc(new Date(it.createdAt).toLocaleString()) : '—'}${it.scannedBy ? ' by ' + esc(it.scannedBy) : ''}</p>`;
     body.classList.remove('sl', 'sr');
     if (dir) {
       void body.offsetWidth;
