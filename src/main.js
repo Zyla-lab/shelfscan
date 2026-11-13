@@ -3,7 +3,7 @@ import { putItem, putImages, getItem, getImages, allItems, deleteItem, clearAll,
 import { enqueue, onItemUpdated, pendingCount, ABOUT_FIELDS } from './pipeline.js';
 import { preloadOCR } from './ocr.js';
 import { testKey, costOf, describeError } from './claude.js';
-import { exportCSV, exportZIP, exportHTML, importZIP } from './export.js';
+import { exportCSV, exportZIP, exportCatalog, importZIP } from './export.js';
 import { TEMPS } from './parse.js';
 import { structureImageUrl, compoundPageUrl } from './pubchem.js';
 import { settings } from './settings.js';
@@ -774,7 +774,16 @@ $('#mode-table').addEventListener('click', () => {
 });
 $('#btn-html').addEventListener('click', async () => {
   if (!items.length) return toast('Nothing to export yet');
-  await exportHTML();
+  const b = $('#btn-html');
+  b.disabled = true;
+  try {
+    await exportCatalog((i, n) => (b.textContent = `Preparing ${i}/${n}…`));
+  } catch (e) {
+    toast(`Export failed: ${e.message}`);
+  } finally {
+    b.disabled = false;
+    b.textContent = 'Offline catalog';
+  }
 });
 $('#btn-csv').addEventListener('click', async () => {
   if (!items.length) return toast('Nothing to export yet');
@@ -785,12 +794,12 @@ $('#btn-zip').addEventListener('click', async () => {
   const b = $('#btn-zip');
   b.disabled = true;
   try {
-    await exportZIP((i, n) => (b.textContent = `Packing photos ${i}/${n}…`));
+    await exportZIP((i, n) => (b.textContent = `Packing ${Math.round((100 * i) / n)}%…`));
   } catch (e) {
     toast(`Export failed: ${e.message}`);
   } finally {
     b.disabled = false;
-    b.textContent = 'Export ZIP (CSV + photos)';
+    b.textContent = 'ZIP + photos';
   }
 });
 

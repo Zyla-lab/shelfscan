@@ -105,8 +105,10 @@ export async function exportZIP(onProgress) {
   for (let i = 0; i < items.length; i++) {
     const imgs = await getImages(items[i].id);
     if (imgs?.full) folder.file(imageFileName(items[i], i), imgs.full);
-    onProgress?.(i + 1, items.length);
+    onProgress?.(i + 1, items.length * 2);
   }
+  zip.file('catalog.html', await catalogHTML(items, true, (i, n) => onProgress?.(n + i, n * 2)));
+  zip.file('README.txt', README(items.length, new Date().toLocaleString()));
   const blob = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
   await saveFile(new Blob([blob], { type: 'application/zip' }), `chemicals_${stamp()}.zip`);
 }
@@ -133,8 +135,6 @@ export async function importZIP(file, makeThumb) {
   return n;
 }
 
-const htmlEsc = (v) => String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
-
 function blobToDataURL(blob) {
   return new Promise((resolve) => {
     const r = new FileReader();
@@ -144,40 +144,73 @@ function blobToDataURL(blob) {
   });
 }
 
-/** Self-contained, printable HTML datasheet with a thumbnail of every container. */
-export async function exportHTML() {
-  const items = sorted(await allItems());
-  const rows = [];
+/** Re-encode a photo at a smaller size for embedding in the HTML catalog. */
+async function shrink(blob, maxSide, quality) {
+  const bmp = await createImageBitmap(blob);
+  const k = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas');
+  c.width = Math.round(bmp.width * k);
+  c.height = Math.round(bmp.height * k);
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+  bmp.close?.();
+  const out = await new Promise((r) => c.toBlob(r, 'image/jpeg', quality));
+  return blobToDataURL(out);
+}
+
+// What the catalog shows: the export columns plus status; internal bookkeeping is left out.
+const CATALOG_KEYS = [...COLUMNS.map(([k]) => k), 'status'];
+const pick = (it) => Object.fromEntries(CATALOG_KEYS.filter((k) => it[k] != null && it[k] !== '').map((k) => [k, it[k]]));
+
+/**
+ * Build the offline catalog HTML. Photos are embedded (240 px for lists, 900 px for the detail
+ * view: about 100 KB per container, so ~15 MB for 150), so the file works on its own.
+ * @param {object[]} items sorted items
+ * @param {boolean} withFullLinks link each item to images/<file> (true inside the ZIP)
+ */
+async function catalogHTML(items, withFullLinks, onProgress) {
+  const thumbs = {};
+  const photos = {};
+  const full = {};
   for (let i = 0; i < items.length; i++) {
     const it = items[i];
     const imgs = await getImages(it.id);
-    const src = imgs?.thumb ? await blobToDataURL(imgs.thumb) : '';
-    const sig = /danger/i.test(it.signal) ? 'danger' : /warn/i.test(it.signal) ? 'warn' : '';
-    rows.push(`<tr>
-      <td class="n">${i + 1}</td>
-      <td>${src ? `<img src="${src}" alt="">` : ''}</td>
-      <td><b>${htmlEsc(it.name || 'Unnamed')}</b><div class="s">${htmlEsc([it.formula, it.mw && `${it.mw} g/mol`].filter(Boolean).join(' · '))}</div>
-        ${it.category || it.description ? `<div class="s">${htmlEsc([it.category, it.description].filter(Boolean).join(': '))}</div>` : ''}
-        ${it.signal ? `<div class="sig ${sig}">${htmlEsc(it.signal)}${it.hazards ? ` · ${htmlEsc(it.hazards)}` : ''}</div>` : ''}</td>
-      <td class="m">${htmlEsc(it.cas)}</td>
-      <td>${htmlEsc(it.supplier)}<div class="s m">${htmlEsc(it.catalog)}</div><div class="s m">${it.lot ? `Lot ${htmlEsc(it.lot)}` : ''}</div></td>
-      <td>${htmlEsc(it.amount)}<div class="s">${htmlEsc(it.purity)}</div></td>
-      <td>${htmlEsc(it.location)}<div class="s">${htmlEsc(it.temp)}</div></td>
-    </tr>`);
+    if (imgs?.thumb) thumbs[it.id] = await shrink(imgs.thumb, 240, 0.7);
+    if (imgs?.full) {
+      photos[it.id] = await shrink(imgs.full, 900, 0.72);
+      if (withFullLinks) full[it.id] = `images/${imageFileName(it, i)}`;
+    }
+    onProgress?.(i + 1, items.length);
   }
-  const doc = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Chemical inventory ${new Date().toLocaleDateString()}</title>
-<style>
-body{font:13px/1.35 system-ui,sans-serif;margin:24px;color:#0f1726}
-h1{font-size:20px;margin:0}.meta{color:#5b6678;margin:4px 0 16px}
-table{border-collapse:collapse;width:100%}th{background:#0f1726;color:#fff;text-align:left;font-size:11px;text-transform:uppercase;padding:8px}
-td{border-bottom:1px solid #dde2ea;padding:6px 8px;vertical-align:top}tr{page-break-inside:avoid}
-img{width:64px;height:76px;object-fit:cover;border-radius:6px}.s{color:#5b6678;font-size:12px}.m{font-family:ui-monospace,Menlo,monospace}
-.n{color:#5b6678}.sig{font-size:11px;font-weight:700;margin-top:3px}.danger{color:#c62f2f}.warn{color:#b26a00}
-@media print{body{margin:8mm}}
-</style></head><body>
-<h1>Chemical inventory</h1><div class="meta">${items.length} containers · generated ${htmlEsc(new Date().toLocaleString())}</div>
-<table><thead><tr><th>#</th><th>Photo</th><th>Chemical</th><th>CAS</th><th>Supplier / Cat / Lot</th><th>Amount</th><th>Location / Temp</th></tr></thead>
-<tbody>${rows.join('')}</tbody></table></body></html>`;
-  await saveFile(new Blob([doc], { type: 'text/html' }), `chemicals_${stamp()}.html`);
+  const { viewerHTML } = await import('./viewer.js');
+  return viewerHTML({
+    title: 'Chemical inventory',
+    exportedAt: new Date().toISOString(),
+    items: items.map(pick),
+    thumbs,
+    photos,
+    full,
+  });
 }
+
+/** Single-file offline catalog (search, filters, details, print), for sharing or archiving. */
+export async function exportCatalog(onProgress) {
+  const items = sorted(await allItems());
+  const html = await catalogHTML(items, false, onProgress);
+  await saveFile(new Blob([html], { type: 'text/html' }), `chemical-inventory_${stamp()}.html`);
+}
+
+export const README = (n, when) => `Chemical inventory: ${n} containers, exported ${when} from ShelfScan.
+
+catalog.html   Open in any web browser (phone or computer, works offline). Search, filter by
+               category / location / temperature, cards or table, details with photos, Print.
+catalog.csv    The same data as a spreadsheet (UTF-8; opens in Excel, Numbers, LibreOffice).
+               The "Image file" column names each container's photo in images/.
+catalog.json   Complete machine-readable data.
+images/        Full-resolution photo of every container.
+
+To continue editing on a phone: open ShelfScan (https://zyla-lab.github.io/shelfscan/),
+Settings > Import backup ZIP, and pick this ZIP file.
+
+Descriptions, uses and concentrations were written by Claude from general knowledge; check them
+before relying on them. Formula, MW, IUPAC, SMILES and GHS data come from PubChem.
+`;

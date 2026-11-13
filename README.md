@@ -50,9 +50,15 @@ label is read, then cached by the browser.
    number and tap *Re-read label*. **2× in lab** marks duplicate CAS numbers.
 6. Export:
    - **CSV**: the spreadsheet (UTF-8, opens in Excel).
-   - **Printable sheet**: an HTML table with a thumbnail of every bottle. Open it and print to PDF.
-   - **ZIP + photos**: CSV, JSON and full-size photos. This is also the backup format; restore it with
-     *Settings → Import backup ZIP*.
+   - **Offline catalog**: one HTML file (about 100 KB per bottle) with the photos and data inside. It
+     opens in any browser on any device without the app or a network: search, filters by category /
+     location / temperature, cards or table, details with swipe, and Print.
+   - **ZIP + photos**: the archive and backup format. It contains `catalog.html` (the offline catalog,
+     linked to the full-size photos), `catalog.csv`, `catalog.json`, `images/` (full-resolution photos)
+     and a `README.txt`. Restore it on any phone with *Settings → Import backup ZIP*.
+
+   For a lab archive, keep the ZIP: plain HTML, CSV, JSON and JPEG files that stay readable without
+   this app.
 
 Other controls: **AUTO** toggles hands-free capture (otherwise use the shutter button), ⚡ is the
 flashlight, **+ Photo** adds pictures from the gallery, and *Reset empty view* re-learns the empty spot if
@@ -69,7 +75,8 @@ auto-capture gets confused.
 | `src/pubchem.js` | CAS or name → PubChem: canonical name, formula, MW, IUPAC, SMILES, InChIKey, GHS. Uses the ECHA aggregate and ignores minority hazard statements. |
 | `src/pipeline.js` | Background queue: OCR → barcodes (Android Chrome) → PubChem → save. |
 | `src/db.js` | IndexedDB, with records and photos in separate stores. |
-| `src/export.js` | CSV, printable HTML, and ZIP export/import. |
+| `src/export.js` | CSV, offline catalog and ZIP export; ZIP import. |
+| `src/viewer.js` | The offline catalog: a self-contained HTML page with embedded data, photos and viewer script. |
 | `src/main.js` | UI. |
 
 ```bash
