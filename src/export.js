@@ -5,6 +5,13 @@ import { allItems, getImages, putItem, putImages } from './db.js';
 export const COLUMNS = [
   ['name', 'Name'],
   ['cas', 'CAS'],
+  ['category', 'Category'],
+  ['description', 'Description'],
+  ['uses', 'Used for'],
+  ['areas', 'Research areas'],
+  ['workingConc', 'Working concentration'],
+  ['stockSolution', 'Stock solution'],
+  ['handling', 'Handling'],
   ['formula', 'Formula'],
   ['mw', 'MW (g/mol)'],
   ['supplier', 'Supplier'],
@@ -150,6 +157,7 @@ export async function exportHTML() {
       <td class="n">${i + 1}</td>
       <td>${src ? `<img src="${src}" alt="">` : ''}</td>
       <td><b>${htmlEsc(it.name || 'Unnamed')}</b><div class="s">${htmlEsc([it.formula, it.mw && `${it.mw} g/mol`].filter(Boolean).join(' · '))}</div>
+        ${it.category || it.description ? `<div class="s">${htmlEsc([it.category, it.description].filter(Boolean).join(': '))}</div>` : ''}
         ${it.signal ? `<div class="sig ${sig}">${htmlEsc(it.signal)}${it.hazards ? ` · ${htmlEsc(it.hazards)}` : ''}</div>` : ''}</td>
       <td class="m">${htmlEsc(it.cas)}</td>
       <td>${htmlEsc(it.supplier)}<div class="s m">${htmlEsc(it.catalog)}</div><div class="s m">${it.lot ? `Lot ${htmlEsc(it.lot)}` : ''}</div></td>

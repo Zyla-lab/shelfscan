@@ -3,10 +3,11 @@
 import { getItem, getImages, putItem } from './db.js';
 import { recognize } from './ocr.js';
 import { parseLabel, parseGS1, tempFromText, findCasNumbers } from './parse.js';
-import { readLabel, describeError, isConnectionError } from './claude.js';
+import { readLabel, describeCompound, describeError, isConnectionError } from './claude.js';
 import { resolve } from './pubchem.js';
 import { settings } from './settings.js';
 
+// Jobs: 'read' = read the label + PubChem (+ notes); 'describe' = only write the compound notes.
 const queue = [];
 const active = new Set();
 const listeners = new Set();
@@ -15,9 +16,49 @@ export const onItemUpdated = (fn) => listeners.add(fn);
 const notify = (item) => listeners.forEach((fn) => fn(item));
 export const pendingCount = () => queue.length + active.size;
 
-export function enqueue(id) {
-  if (!queue.includes(id) && !active.has(id)) queue.push(id);
+export function enqueue(id, job = 'read') {
+  if (!queue.some((q) => q.id === id) && !active.has(id)) queue.push({ id, job });
   pump();
+}
+
+const claudeReady = () => {
+  const s = settings.get();
+  return s.engine === 'claude' && !!s.apiKey && navigator.onLine;
+};
+
+/** Item fields filled by describeCompound(). */
+export const ABOUT_FIELDS = ['category', 'description', 'uses', 'areas', 'workingConc', 'stockSolution', 'handling', 'aboutBy'];
+
+async function addNotes(item) {
+  if (!item.name || !claudeReady()) return;
+  try {
+    const { data: d, usage } = await describeCompound(item, settings.get().apiKey);
+    recordUsage(usage);
+    if (!d.known) {
+      item.aboutBy = 'unknown to Claude';
+      return;
+    }
+    item.category = d.category;
+    item.description = d.description;
+    item.uses = d.uses;
+    item.areas = (d.areas || []).join(', ');
+    item.workingConc = d.working_concentration;
+    item.stockSolution = d.stock_solution;
+    item.handling = d.handling;
+    item.aboutBy = 'Claude Haiku';
+  } catch (e) {
+    if (e.usage) recordUsage(e.usage);
+    console.warn('notes failed', e); // non-fatal: "Add descriptions" in Settings retries
+  }
+}
+
+async function describeItem(id) {
+  const item = await getItem(id);
+  if (!item?.name) return;
+  await addNotes(item);
+  item.updatedAt = new Date().toISOString();
+  await putItem(item);
+  notify(item);
 }
 
 // Claude requests are network-bound, so a few run side by side (a full re-read of a big library
@@ -26,9 +67,9 @@ const parallelism = () => (settings.get().engine === 'claude' && settings.get().
 
 function pump() {
   while (queue.length && active.size < parallelism()) {
-    const id = queue.shift();
+    const { id, job } = queue.shift();
     active.add(id);
-    work(id).finally(() => {
+    (job === 'describe' ? describeItem(id).catch((e) => console.error(e)) : work(id)).finally(() => {
       active.delete(id);
       if (!queue.length && !active.size) notify(null);
       pump();
@@ -205,4 +246,7 @@ async function processItem(id) {
   item.updatedAt = new Date().toISOString();
   await putItem(item);
   notify(item);
+  // Notes only for confidently identified items (a wrong identity would give wrong notes).
+  // Re-fetched inside describeItem so edits made meanwhile are not overwritten.
+  if (item.status === 'done' && !item.description) await describeItem(id);
 }

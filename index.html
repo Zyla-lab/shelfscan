@@ -118,7 +118,8 @@
             <button id="btn-retry" class="btn">Re-read unresolved</button>
           </div>
           <button id="btn-reread-all" class="btn">Re-read all scans</button>
-          <p class="muted small" style="margin:0">Re-reading uses the reader selected above and replaces what was read before. Names and CAS numbers you typed, locations, temperatures and notes are kept.</p>
+          <button id="btn-describe-all" class="btn">Add descriptions</button>
+          <p class="muted small" style="margin:0">Re-reading uses the reader selected above and replaces what was read before. Names and CAS numbers you typed, locations, temperatures and notes are kept. <i>Add descriptions</i> asks Claude Haiku what each identified compound is and what it is used for (text only, no photos), for scans that don't have one yet.</p>
           <button id="btn-clear" class="btn danger">Delete all scans</button>
         </div>
         <p class="muted small center">ShelfScan · data stays on this device until you export it.</p>
@@ -142,6 +143,11 @@
       <div class="sheet-bar">
         <button id="sheet-close" class="link">← Back</button>
         <span id="sheet-status"></span>
+        <span class="sheet-nav">
+          <button id="d-prev" class="link" type="button" aria-label="Previous chemical">‹</button>
+          <span id="d-pos" class="muted small"></span>
+          <button id="d-next" class="link" type="button" aria-label="Next chemical">›</button>
+        </span>
         <button id="sheet-delete" class="link danger-text">Delete</button>
       </div>
       <div class="sheet-body">
@@ -158,7 +164,10 @@
           <summary>Recognized text</summary>
           <pre id="d-ocr"></pre>
         </details>
-        <button id="d-reread" class="btn">Re-read label</button>
+        <div class="btn-row">
+          <button id="d-reread" class="btn">Re-read label</button>
+          <button id="d-describe" class="btn hidden">Write description</button>
+        </div>
       </div>
     </div>
 

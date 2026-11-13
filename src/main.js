@@ -1,6 +1,6 @@
 import { Camera, AutoCapture } from './camera.js';
 import { putItem, putImages, getItem, getImages, allItems, deleteItem, clearAll, requestPersistence } from './db.js';
-import { enqueue, onItemUpdated, pendingCount } from './pipeline.js';
+import { enqueue, onItemUpdated, pendingCount, ABOUT_FIELDS } from './pipeline.js';
 import { preloadOCR } from './ocr.js';
 import { testKey, costOf, describeError } from './claude.js';
 import { exportCSV, exportZIP, exportHTML, importZIP } from './export.js';
@@ -304,7 +304,7 @@ async function renderRecent(freshId) {
 
 function matches(it, q) {
   if (!q) return true;
-  const hay = [it.name, it.cas, it.formula, it.supplier, it.catalog, it.lot, it.location, it.notes, it.iupac, it.pubchemName].join(' ').toLowerCase();
+  const hay = [it.name, it.cas, it.formula, it.supplier, it.catalog, it.lot, it.location, it.notes, it.iupac, it.pubchemName, it.category, it.description, it.uses, it.areas].join(' ').toLowerCase();
   return q
     .toLowerCase()
     .split(/\s+/)
@@ -337,11 +337,11 @@ async function renderLibrary() {
   const dupTag = (it) => (it.cas && dups.get(it.cas) > 1 ? `<span class="tag warn">${dups.get(it.cas)}× in lab</span>` : '');
   if (mode === 'table') {
     $('#list').innerHTML = `<div class="table-wrap"><table class="sheet-table"><thead><tr>
-      <th></th><th>Name</th><th>CAS</th><th>Formula</th><th>MW</th><th>Supplier</th><th>Cat #</th><th>Lot</th><th>Amount</th><th>Temp</th><th>Location</th><th>Hazard</th></tr></thead><tbody>
+      <th></th><th>Name</th><th>Category</th><th>CAS</th><th>Formula</th><th>MW</th><th>Supplier</th><th>Cat #</th><th>Lot</th><th>Amount</th><th>Temp</th><th>Location</th><th>Hazard</th></tr></thead><tbody>
       ${list
         .map(
           (it, i) => `<tr data-id="${it.id}"><td><img src="${urls[i]}" alt="" loading="lazy" /></td>
-          <td class="name">${esc(displayName(it))} ${statusTag(it)}${dupTag(it)}</td><td class="mono">${esc(it.cas)}</td><td>${esc(it.formula)}</td><td>${esc(it.mw)}</td>
+          <td class="name">${esc(displayName(it))} ${statusTag(it)}${dupTag(it)}</td><td>${esc(it.category)}</td><td class="mono">${esc(it.cas)}</td><td>${esc(it.formula)}</td><td>${esc(it.mw)}</td>
           <td>${esc(it.supplier)}</td><td class="mono">${esc(it.catalog)}</td><td class="mono">${esc(it.lot)}</td><td>${esc(it.amount)}</td>
           <td>${esc(it.temp)}</td><td>${esc(it.location)}</td><td>${signalTag(it)}</td></tr>`,
         )
@@ -358,7 +358,8 @@ async function renderLibrary() {
           <div class="name">${esc(displayName(it))}</div>
           ${l1 ? `<div class="line">${esc(l1)}</div>` : ''}
           ${l2 ? `<div class="line">${esc(l2)}</div>` : ''}
-          <div class="tags">${statusTag(it)}${signalTag(it)}${dupTag(it)}${tempTag(it)}${it.location ? `<span class="tag loc">📍 ${esc(it.location)}</span>` : ''}</div>
+          ${it.description ? `<div class="line desc">${esc(it.description)}</div>` : ''}
+          <div class="tags">${it.category ? `<span class="tag cat">${esc(it.category)}</span>` : ''}${statusTag(it)}${signalTag(it)}${dupTag(it)}${tempTag(it)}${it.location ? `<span class="tag loc">📍 ${esc(it.location)}</span>` : ''}</div>
         </div></button>`;
     })
     .join('');
@@ -383,6 +384,10 @@ function renderLocation() {
 // ---------------------------------------------------------------- detail sheet
 const FIELDS = [
   ['name', 'Name', 'wide name'],
+  ['category', 'Category'],
+  ['areas', 'Research areas'],
+  ['description', 'Description', 'wide', 'textarea'],
+  ['uses', 'Used for', 'wide', 'textarea'],
   ['cas', 'CAS number'],
   ['formula', 'Formula'],
   ['mw', 'MW (g/mol)'],
@@ -397,10 +402,14 @@ const FIELDS = [
   ['signal', 'GHS signal'],
   ['hazards', 'H-codes'],
   ['storage', 'Storage', 'wide'],
+  ['workingConc', 'Working conc.'],
+  ['stockSolution', 'Stock solution'],
+  ['handling', 'Handling', 'wide', 'textarea'],
   ['notes', 'Notes', 'wide', 'textarea'],
 ];
 
 let photoUrl = '';
+let navIds = []; // ids in the order of the list the sheet was opened from (Library filter/sort or recent strip)
 async function openDetail(id) {
   const it = items.find((i) => i.id === id) || (await getItem(id));
   if (!it) return;
@@ -412,7 +421,60 @@ async function openDetail(id) {
   photoUrl = imgs?.full ? URL.createObjectURL(imgs.full) : '';
   $('#d-photo').src = photoUrl;
   fillDetail(it);
+  updateNav();
 }
+
+function updateNav() {
+  const i = navIds.indexOf(openId);
+  $('#d-pos').textContent = i >= 0 && navIds.length > 1 ? `${i + 1} / ${navIds.length}` : '';
+  $('#d-prev').disabled = i <= 0;
+  $('#d-next').disabled = i < 0 || i >= navIds.length - 1;
+}
+
+/** Show the next (dir = 1) or previous (dir = -1) chemical in the list the sheet came from. */
+async function step(dir) {
+  const i = navIds.indexOf(openId);
+  const j = i + dir;
+  if (i < 0 || j < 0 || j >= navIds.length) return;
+  if (dirty) {
+    clearTimeout(saveTimer);
+    dirty = false;
+    const cur = items.find((x) => x.id === openId);
+    if (cur) await putItem(cur);
+  }
+  document.activeElement?.blur?.();
+  const body = $('.sheet-body');
+  body.classList.remove('slide-l', 'slide-r');
+  void body.offsetWidth; // restart the animation
+  body.classList.add(dir > 0 ? 'slide-l' : 'slide-r');
+  body.scrollTop = 0;
+  await openDetail(navIds[j]);
+}
+
+$('#d-prev').addEventListener('click', () => step(-1));
+$('#d-next').addEventListener('click', () => step(1));
+
+// Swipe left = next, right = previous. Ignored when the gesture starts in a text field (cursor moves)
+// or is mostly vertical (scrolling).
+let swipe = null;
+$('#sheet').addEventListener('touchstart', (e) => {
+  swipe = e.touches.length === 1 && !e.target.closest('input, textarea, select')
+    ? { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now() }
+    : null;
+}, { passive: true });
+$('#sheet').addEventListener('touchend', (e) => {
+  if (!swipe) return;
+  const dx = e.changedTouches[0].clientX - swipe.x;
+  const dy = e.changedTouches[0].clientY - swipe.y;
+  const fast = Date.now() - swipe.t < 800;
+  swipe = null;
+  if (fast && Math.abs(dx) > 60 && Math.abs(dx) > 1.5 * Math.abs(dy)) step(dx < 0 ? 1 : -1);
+}, { passive: true });
+document.addEventListener('keydown', (e) => {
+  if (!openId || e.target.closest?.('input, textarea, select')) return;
+  if (e.key === 'ArrowRight') step(1);
+  else if (e.key === 'ArrowLeft') step(-1);
+});
 
 function fillDetail(it) {
   $('#sheet-status').innerHTML = statusTag(it) || '<span class="tag ok">saved</span>';
@@ -454,10 +516,33 @@ function fillDetail(it) {
   if (it.smiles) meta.push(`SMILES: ${esc(it.smiles)}`);
   if (it.cid) meta.push(`<a href="${compoundPageUrl(it.cid)}" target="_blank" rel="noopener">PubChem CID ${it.cid}</a>${it.matchedBy ? ` (matched by ${esc(it.matchedBy)})` : ''}`);
   if (it.barcode) meta.push(`Barcode: ${esc(it.barcode)}`);
+  if (it.aboutBy === 'Claude Haiku') meta.push('Description, uses, concentrations and handling were written by Claude Haiku from general knowledge. Check before relying on them.');
+  else if (it.aboutBy) meta.push('Claude did not recognize this substance, so there is no description.');
   meta.push(`Scanned ${new Date(it.createdAt).toLocaleString()}${it.engine ? ` · read by ${esc(it.engine)}` : ''}`);
   $('#d-meta').innerHTML = meta.map((m) => `<div>${m}</div>`).join('');
   $('#d-ocr').textContent = it.ocrText || '(none yet)';
+  $('#d-describe').classList.toggle('hidden', !claudeReady() || !it.name || it.status === 'processing');
+  $('#d-describe').textContent = it.description ? 'Rewrite description' : 'Write description';
 }
+
+const claudeReady = () => settings.get().engine === 'claude' && !!settings.get().apiKey;
+
+async function redescribe(it) {
+  for (const k of ABOUT_FIELDS) delete it[k];
+  await putItem(it);
+  enqueue(it.id, 'describe');
+  updateQueueChip();
+}
+
+$('#d-describe').addEventListener('click', async () => {
+  const it = items.find((i) => i.id === openId);
+  if (!it) return;
+  clearTimeout(saveTimer);
+  dirty = false;
+  await redescribe(it);
+  fillDetail(it);
+  toast('Writing description…');
+});
 
 function closeDetail() {
   openId = null;
@@ -469,6 +554,7 @@ function closeDetail() {
 }
 
 let saveTimer;
+let dirty = false;
 $('#d-form').addEventListener('input', (e) => {
   const it = items.find((i) => i.id === openId);
   if (!it) return;
@@ -478,7 +564,11 @@ $('#d-form').addEventListener('input', (e) => {
   it.updatedAt = new Date().toISOString();
   if (it.status === 'review' && it.name) it.status = 'done';
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => putItem(it), 300);
+  dirty = true;
+  saveTimer = setTimeout(() => {
+    dirty = false;
+    putItem(it);
+  }, 300);
 });
 
 $('#d-cands').addEventListener('click', async (e) => {
@@ -492,7 +582,7 @@ $('#d-cands').addEventListener('click', async (e) => {
   fillDetail(it);
 });
 
-const AUTO_FIELDS = ['formula', 'mw', 'supplier', 'catalog', 'lot', 'amount', 'purity', 'expiry', 'signal', 'hazards', 'pictograms', 'storage', 'iupac', 'smiles', 'inchikey', 'cid', 'pubchemName', 'matchedBy', 'barcode', 'ocrText', 'candidates', 'error', 'engine', 'confidence', 'aiTokens'];
+const AUTO_FIELDS = ['formula', 'mw', 'supplier', 'catalog', 'lot', 'amount', 'purity', 'expiry', 'signal', 'hazards', 'pictograms', 'storage', 'iupac', 'smiles', 'inchikey', 'cid', 'pubchemName', 'matchedBy', 'barcode', 'ocrText', 'candidates', 'error', 'engine', 'confidence', 'aiTokens', ...ABOUT_FIELDS];
 
 const readerName = () => (settings.get().engine === 'claude' && settings.get().apiKey ? 'Claude Haiku' : 'on-device OCR');
 
@@ -591,6 +681,7 @@ for (const sel of ['#recent', '#list']) {
   $(sel).addEventListener('click', (e) => {
     const b = e.target.closest('[data-id]');
     if (b) {
+      navIds = [...$(sel).querySelectorAll('[data-id]')].map((x) => x.dataset.id);
       history.pushState({ sheet: true }, '');
       openDetail(b.dataset.id);
     }
@@ -798,6 +889,18 @@ $('#btn-retry').addEventListener('click', async () => {
   if (!todo.length) return toast('Nothing to re-read');
   for (const it of todo) await reread(it);
   toast(`Re-reading ${todo.length} scan${todo.length === 1 ? '' : 's'} with ${readerName()}…`);
+});
+
+$('#btn-describe-all').addEventListener('click', async () => {
+  if (!claudeReady()) return toast('Choose Claude Haiku and add an API key above first', 4000);
+  // only identified items: notes for a wrong identity would be wrong
+  const todo = items.filter((i) => i.status === 'done' && i.name && !i.description && !i.aboutBy);
+  if (!todo.length) return toast('Every identified scan already has a description');
+  const est = costOf({ inTok: 700 * todo.length, outTok: 350 * todo.length });
+  if (!confirm(`Ask Claude Haiku to describe ${todo.length} compounds (${est < 0.01 ? 'under 1 cent' : `about $${est.toFixed(2)}`})? Only names and CAS numbers are sent, no photos.`)) return;
+  for (const it of todo) enqueue(it.id, 'describe');
+  updateQueueChip();
+  toast(`Writing ${todo.length} descriptions…`);
 });
 
 $('#btn-reread-all').addEventListener('click', async () => {

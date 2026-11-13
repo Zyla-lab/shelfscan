@@ -85,6 +85,82 @@ function toJpegBase64(canvas) {
   return c.toDataURL('image/jpeg', 0.85).split(',')[1];
 }
 
+// ---------------------------------------------------------------- compound notes (text only)
+// Written from the model's general knowledge once the substance is identified, so it is a separate,
+// image-free request: ~700 input + ~300 output tokens, about $0.0002 per compound.
+
+export const CATEGORIES = [
+  'Buffer', 'Salt', 'Acid / base', 'Detergent', 'Reducing agent', 'Protease inhibitor', 'Antibiotic',
+  'Nucleic acid reagent', 'Amino acid', 'Carbohydrate', 'Lipid', 'Cofactor / vitamin', 'Protein / enzyme',
+  'Crystallization reagent', 'Precipitant / polymer', 'Cryoprotectant', 'Chelator', 'Dye / stain',
+  'Solvent', 'Metal compound', 'Organic reagent', 'Media component', 'Other',
+];
+export const AREAS = ['Molecular biology', 'Structural biology', 'Biochemistry', 'Cell biology', 'Microbiology', 'Chemistry', 'General lab'];
+
+const ABOUT_SYSTEM = `You write short reference notes for the chemical inventory of a molecular biology and structural biology lab (protein expression and purification, crystallography, cryo-EM, biochemistry).
+
+Given a substance, return:
+- known: false if you do not recognize this exact substance with confidence; then leave every other text field "" and areas empty.
+- category: the single best category for how this lab would use it.
+- description: one or two plain sentences on what the substance is.
+- uses: the main lab uses, most relevant to molecular and structural biology first, as 2-4 short phrases separated by "; " (e.g. "Reducing agent in protein purification buffers; Keeps cysteines reduced during crystallization").
+- areas: the research areas where it is commonly used.
+- working_concentration: typical working concentration range in those uses (e.g. "1-5 mM"), or "".
+- stock_solution: a typical stock and how to store it (e.g. "1 M in water, aliquot, -20 °C"), or "".
+- handling: one short sentence on notable handling or stability points (light-sensitive, hygroscopic, oxidizes in air, toxic, etc.), or "".
+
+Be concise and factual. Do not invent uses; leave a field "" rather than guess.`;
+
+const ABOUT_SCHEMA = {
+  type: 'object',
+  properties: {
+    known: { type: 'boolean' },
+    category: { type: 'string', enum: CATEGORIES },
+    description: field,
+    uses: field,
+    areas: { type: 'array', items: { type: 'string', enum: AREAS } },
+    working_concentration: field,
+    stock_solution: field,
+    handling: field,
+  },
+  required: ['known', 'category', 'description', 'uses', 'areas', 'working_concentration', 'stock_solution', 'handling'],
+  additionalProperties: false,
+};
+
+/**
+ * Short notes about an identified compound: what it is and what it is used for.
+ * @param {object} item  inventory record (name, cas, formula, iupac, purity, supplier are used)
+ */
+export async function describeCompound(item, apiKey) {
+  const c = await getClient(apiKey);
+  const facts = [
+    ['Name', item.name],
+    ['PubChem name', item.pubchemName !== item.name ? item.pubchemName : ''],
+    ['CAS', item.cas],
+    ['Formula', item.formula],
+    ['IUPAC name', item.iupac],
+    ['Grade / concentration on label', item.purity],
+    ['Supplier', item.supplier],
+  ]
+    .filter(([, v]) => v)
+    .map(([k, v]) => `${k}: ${v}`)
+    .join('\n');
+  const response = await c.messages.create({
+    model: MODEL,
+    max_tokens: 2048,
+    system: ABOUT_SYSTEM,
+    output_config: { effort: 'low', format: { type: 'json_schema', schema: ABOUT_SCHEMA } },
+    messages: [{ role: 'user', content: facts }],
+  });
+  const usage = { inTok: response.usage.input_tokens, outTok: response.usage.output_tokens };
+  if (response.stop_reason === 'refusal' || response.stop_reason === 'max_tokens') {
+    throw Object.assign(new Error(`No description (${response.stop_reason}).`), { usage });
+  }
+  const text = response.content.find((b) => b.type === 'text')?.text;
+  if (!text) throw Object.assign(new Error('Claude returned no answer.'), { usage });
+  return { data: JSON.parse(text), usage };
+}
+
 /** Turn SDK errors into one short message for the item's alert line. */
 export function describeError(e) {
   if (!sdk || !(e instanceof sdk.APIError)) return String(e?.message || e);
